@@ -69,10 +69,6 @@ impl App {
     fn new() -> Result<Self, anyhow::Error> {
         let pipeline = gst::Pipeline::new(Some("janus"));
 
-        /*let pipeline_list = format!("webrtcbin name=web audiotestsrc is-live=true wave=8 ! audioconvert ! opusenc ! rtpopuspay ! web.sink_0 autovideosrc ! videoconvert ! vp8enc ! rtpvp8pay ! web.sink_1");
-        let pipeline = gst::parse_launch(&pipeline_list)?;
-        let pipeline = pipeline.downcast::<gst::Pipeline>().expect("Couldn't downcast pipeline");*/
-
         let bus = pipeline.get_bus().unwrap();
         let app = App(Arc::new(AppInner { pipeline }));
 

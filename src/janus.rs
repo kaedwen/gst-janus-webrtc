@@ -76,6 +76,12 @@ const VP8: VideoParameter = VideoParameter {
     payloader: "rtpvp8pay picture-id-mode=2"
 };
 
+const VP9: VideoParameter = VideoParameter {
+    encoder: "vp9enc target-bitrate=100000 overshoot=25 undershoot=100 deadline=33000 keyframe-max-dist=1",
+    encoding_name: "VP9",
+    payloader: "rtpvp9pay picture-id-mode=2"
+};
+
 const H264: VideoParameter = VideoParameter {
     encoder: "x264enc tune=zerolatency",
     encoding_name: "H264",
@@ -88,6 +94,7 @@ impl std::str::FromStr for VideoParameter {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "vp8" => Ok(VP8),
+            "vp9" => Ok(VP9),
             "h264" => Ok(H264),
             _ => Err(anyhow!(
                 "Invalid video parameter: {}. Use either vp8 or h264",
@@ -116,9 +123,9 @@ pub struct Args {
     #[structopt(short, long, default_value = "ws://127.0.0.1:8188")]
     server: String,
     #[structopt(short, long, default_value = "1234")]
-    room_id: u32,
+    room: u32,
     #[structopt(short, long, default_value = "1234")]
-    feed_id: u32,
+    feed: u32,
     #[structopt(short, long)]
     video: Option<VideoParameter>,
     #[structopt(short, long)]
@@ -503,8 +510,8 @@ impl JanusGateway {
                 "body": {
                     "request": "join",
                     "ptype": "publisher",
-                    "room": args.room_id,
-                    "id": args.feed_id,
+                    "room": args.room,
+                    "id": args.feed,
                 },
             })
             .to_string(),
@@ -520,7 +527,10 @@ impl JanusGateway {
         if let Some(codec) = args.video {
             println!("Using Video Codec {}", codec.encoding_name);
             let video_bin = gst::parse_bin_from_description(
-                format!(r#"autovideosrc ! videoconvert ! {} ! {} ! queue ! capsfilter caps="application/x-rtp,media=video,encoding-name={},payload=96""#, &codec.encoder, &codec.payloader, &codec.encoding_name).as_str(),
+                format!(
+                    "autovideosrc ! videoconvert ! {} ! {} ! queue ! capsfilter caps=application/x-rtp,media=video,encoding-name={},payload=96",
+                    &codec.encoder, &codec.payloader, &codec.encoding_name
+                ).as_str(),
                 true,
             )?;
             webrtc_bin.add(&video_bin)?;
@@ -540,27 +550,26 @@ impl JanusGateway {
                 println!("Connected Video Pads");
             }
 
-            if let Ok(transceiver) = webrtcbin.emit("get-transceiver", &[&sink_index.to_value()]) {
+            if let Ok(transceiver) = webrtcbin.emit("get-transceiver", &[&(sink_index.clone()).to_value()]) {
                 if let Some(t) = transceiver {
                     if let Ok(obj) = t.get::<glib::Object>() {
                         obj.expect("Invalid transceiver")
                             .set_property("do-nack", &true.to_value())?;
+                        println!("Video do-nack");
                     }
                 }
             }
 
             sink_index = sink_index + 1;
-
         }
 
         if let Some(codec) = args.audio {
             println!("Using Audio Codec {}", codec.encoding_name);
             let audio_bin = gst::parse_bin_from_description(
                 format!(
-                    "autoaudiosrc ! audioconvert ! {} ! {} ! queue",
-                    &codec.encoder, &codec.payloader
-                )
-                .as_str(),
+                    "autoaudiosrc ! audioconvert ! {} ! {} ! queue ! capsfilter caps=application/x-rtp,media=audio,encoding-name={},payload=96",
+                    &codec.encoder, &codec.payloader, &codec.encoding_name
+                ).as_str(),
                 true,
             )?;
             webrtc_bin.add(&audio_bin)?;
@@ -580,16 +589,18 @@ impl JanusGateway {
                 println!("Connected Audio Pads");
             }
 
-            if let Ok(transceiver) = webrtcbin.emit("get-transceiver", &[&sink_index.to_value()]) {
+            if let Ok(transceiver) = webrtcbin.emit("get-transceiver", &[&(sink_index.clone()).to_value()]) {
                 if let Some(t) = transceiver {
                     if let Ok(obj) = t.get::<glib::Object>() {
                         obj.expect("Invalid transceiver")
                             .set_property("do-nack", &true.to_value())?;
+                        println!("Audio do-nack");
                     }
                 }
             }
-
         }
+
+        webrtcbin.set_property_from_str("bundle-policy", "max-bundle");
 
         let (send_ws_msg_tx, send_ws_msg_rx) = mpsc::unbounded::<WsMessage>();
 
